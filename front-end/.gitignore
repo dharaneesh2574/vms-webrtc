@@ -1,0 +1,90 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# production
+/build
+/dist
+/out
+
+# misc
+.DS_Store
+.env.local
+.env.*.local
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Mac
+.Trashes
+*.dmg
+*.backup
+.Spotlight-V100
+.TemporaryItems
+.LSOverride
+
+# Linux
+.fuse_hidden*
+.directory
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# editor directories and files
+.idea
+.project
+.classpath
+.c9
+*.iml
+*.iws
+*.swp
+.next/
+.cache/
+
+# firebase
+.firebase/
+firebase-debug.log
+
+# amplify
+amplify/#current-cloud-backend
+amplify/.config
+amplify/backend/amplify-meta.json
+amplify/backend/awscloudformation
+amplify/backend/backend-config.json
+amplify/backend/cli.json
+amplify/backend/function
+amplify/backend/storage
+amplify/backend/api
+amplify/backend/auth
+amplify/backend/hosting
+amplify/backend/analytics
+amplify/backend/geo
+amplify/backend/interactions
+amplify/backend/notifications
+amplify/backend/predictions
+amplify/backend/video
+
+# yarn lock file (if you use npm alongside yarn)
+yarn.lock
+
+# npm lock file (if you use yarn alongside npm)
+package-lock.json
+
+# Environment variables
+.env
+

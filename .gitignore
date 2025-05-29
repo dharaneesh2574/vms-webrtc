@@ -1,0 +1,54 @@
+# Frontend (Node.js/React)
+front-end/node_modules/
+front-end/.env
+front-end/.env.local
+front-end/.env.development.local
+front-end/.env.test.local
+front-end/.env.production.local
+front-end/build/
+front-end/dist/
+front-end/coverage/
+front-end/.pnp
+front-end/.pnp.js
+front-end/npm-debug.log*
+front-end/yarn-debug.log*
+front-end/yarn-error.log*
+
+# Backend (Go)
+RTSPtoWebRTC/rtsp-to-webrtc
+RTSPtoWebRTC/*.exe
+RTSPtoWebRTC/*.exe~
+RTSPtoWebRTC/*.dll
+RTSPtoWebRTC/*.so
+RTSPtoWebRTC/*.dylib
+RTSPtoWebRTC/*.test
+RTSPtoWebRTC/*.out
+RTSPtoWebRTC/vendor/
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project specific
+*.mp4
+*.avi
+*.mkv
+*.mov
+screenshots/
+recordings/
+logs/
+*.log
+
+# Config files that might contain sensitive information
+**/config.local.json
+**/config.dev.json
+**/config.prod.json
+
+# Temporary files
+*.tmp
+*.temp
+.cache/ 

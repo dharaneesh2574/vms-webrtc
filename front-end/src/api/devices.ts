@@ -16,18 +16,21 @@ export const fetchDevices = async (retryCount = 0): Promise<Camera[]> => {
     if (response.headers['content-type']?.includes('application/json')) {
       console.log('Streams response:', response.data);
       const streamsMap = response.data.streams || {};
-      return Object.keys(streamsMap).map((url) => ({
-        id: url,
-        name: streamsMap[url].name || url,
-        streamUrl: url,
-        status: streamsMap[url].status ? 'active' : 'inactive',
-        audioEnabled: !streamsMap[url].disable_audio,
-        ptzSupported: false,
-        health: Math.floor(Math.random() * 100),
-        onDemand: streamsMap[url].on_demand,
-        disableAudio: streamsMap[url].disable_audio,
-        debug: streamsMap[url].debug,
-      }));
+      return Object.keys(streamsMap).map((streamId) => {
+        const stream = streamsMap[streamId];
+        return {
+          id: streamId, // Use the stream key (can be friendly name or URL)
+          name: stream.name || streamId,
+          streamUrl: stream.url, // The actual RTSP URL
+          status: stream.status ? 'active' : 'inactive',
+          audioEnabled: !stream.disable_audio,
+          ptzSupported: false,
+          health: Math.floor(Math.random() * 100),
+          onDemand: stream.on_demand,
+          disableAudio: stream.disable_audio,
+          debug: stream.debug,
+        };
+      });
     } else {
       console.error('Received non-JSON response:', response.data);
       throw new Error('Invalid response format from server');

@@ -1,7 +1,7 @@
 // src/pages/DeviceManager.tsx
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSync, faPlus, faTrash, faEdit, faVolumeUp, faVolumeMute, faVideo } from '@fortawesome/free-solid-svg-icons';
+import { faSync, faPlus, faTrash, faEdit, faVolumeUp, faVolumeMute, faVideo, faCheckCircle } from '@fortawesome/free-solid-svg-icons';
 import { Camera } from '../types';
 import { fetchDevices, addDevice, removeDevice, updateDevice } from '../api/devices';
 
@@ -9,6 +9,7 @@ const DeviceManager: React.FC = () => {
   const [devices, setDevices] = useState<Camera[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Camera | null>(null);
@@ -19,6 +20,11 @@ const DeviceManager: React.FC = () => {
     disableAudio: true,
     debug: false,
   });
+
+  const showSuccess = (message: string) => {
+    setSuccessMessage(message);
+    setTimeout(() => setSuccessMessage(null), 3000);
+  };
 
   const loadDevices = async () => {
     try {
@@ -50,9 +56,14 @@ const DeviceManager: React.FC = () => {
         disable_audio: formData.disableAudio,
         debug: formData.debug,
       });
+      
+      // Immediately update local state and refresh from server
       setDevices([...devices, newDevice]);
+      await loadDevices(); // Refresh to get latest server state
+      
       setShowAddModal(false);
       setFormData({ name: '', streamUrl: '', onDemand: true, disableAudio: true, debug: false });
+      showSuccess(`Stream "${formData.name}" added successfully!`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add device');
       console.error('Error adding device:', err);
@@ -75,10 +86,15 @@ const DeviceManager: React.FC = () => {
         disable_audio: formData.disableAudio,
         debug: formData.debug,
       });
+      
+      // Immediately update local state and refresh from server
       setDevices(devices.map(d => d.id === updatedDevice.id ? updatedDevice : d));
+      await loadDevices(); // Refresh to get latest server state
+      
       setShowEditModal(false);
       setSelectedDevice(null);
       setFormData({ name: '', streamUrl: '', onDemand: true, disableAudio: true, debug: false });
+      showSuccess(`Stream "${formData.name}" updated successfully!`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update device');
       console.error('Error updating device:', err);
@@ -87,12 +103,21 @@ const DeviceManager: React.FC = () => {
     }
   };
 
-  const handleDeleteDevice = async (id: string) => {
+  const handleDeleteDevice = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to delete "${name}"?`)) {
+      return;
+    }
+    
     try {
       setIsLoading(true);
       setError(null);
       await removeDevice(id);
+      
+      // Immediately update local state and refresh from server
       setDevices(devices.filter(d => d.id !== id));
+      await loadDevices(); // Refresh to get latest server state
+      
+      showSuccess(`Stream "${name}" deleted successfully!`);
     } catch (err) {
       setError('Failed to delete device');
       console.error('Error deleting device:', err);
@@ -149,6 +174,13 @@ const DeviceManager: React.FC = () => {
           {error && (
             <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
               {error}
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg flex items-center">
+              <FontAwesomeIcon icon={faCheckCircle} className="mr-2" />
+              {successMessage}
             </div>
           )}
 
@@ -215,7 +247,7 @@ const DeviceManager: React.FC = () => {
                           <FontAwesomeIcon icon={faEdit} />
                         </button>
                         <button
-                          onClick={() => handleDeleteDevice(device.id)}
+                          onClick={() => handleDeleteDevice(device.id, device.name)}
                           className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
                         >
                           <FontAwesomeIcon icon={faTrash} />

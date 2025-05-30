@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -453,13 +455,27 @@ func HTTPAPIAddStream(c *gin.Context) {
 	Config.mutex.Lock()
 	defer Config.mutex.Unlock()
 
-	if _, exists := Config.Streams[newStream.URL]; exists {
-		log.Println("Stream already exists:", newStream.URL)
-		c.JSON(http.StatusConflict, gin.H{"error": "Stream with this URL already exists"})
-		return
+	// Check if stream URL already exists
+	for _, stream := range Config.Streams {
+		if stream.URL == newStream.URL {
+			log.Println("Stream with URL already exists:", newStream.URL)
+			c.JSON(http.StatusConflict, gin.H{"error": "Stream with this URL already exists"})
+			return
+		}
 	}
 
-	Config.Streams[newStream.URL] = StreamST{
+	// Generate unique stream ID
+	streamID := generateStreamID(newStream.Name)
+
+	// Ensure ID is unique
+	counter := 1
+	originalID := streamID
+	for _, exists := Config.Streams[streamID]; exists; _, exists = Config.Streams[streamID] {
+		streamID = fmt.Sprintf("%s_%d", originalID, counter)
+		counter++
+	}
+
+	Config.Streams[streamID] = StreamST{
 		URL:          newStream.URL,
 		Name:         newStream.Name,
 		OnDemand:     newStream.OnDemand,
@@ -468,25 +484,42 @@ func HTTPAPIAddStream(c *gin.Context) {
 		Status:       false,
 		Cl:           make(map[string]viewer),
 	}
-	log.Println("Added stream to config:", newStream.URL)
+	log.Println("Added stream to config with ID:", streamID)
 
 	if err := saveConfig(); err != nil {
 		log.Println("Failed to save config:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save config"})
 		return
 	}
-	log.Println("Saved config successfully for stream:", newStream.URL)
+	log.Println("Saved config successfully for stream:", streamID)
 
 	// Initialize stream to fetch codecs and status
-	Config.RunIFNotRun(newStream.URL)
-	log.Println("Initialized stream:", newStream.URL)
+	go func() {
+		time.Sleep(500 * time.Millisecond) // Brief delay to ensure config is saved
+		log.Println("Starting newly added stream for codec discovery:", streamID)
+		Config.RunIFNotRun(streamID)
+	}()
+	log.Println("Initialized stream:", streamID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":     newStream.URL,
+		"id":     streamID,
 		"name":   newStream.Name,
 		"url":    newStream.URL,
-		"status": Config.Streams[newStream.URL].Status,
+		"status": Config.Streams[streamID].Status,
 	})
+}
+
+func generateStreamID(name string) string {
+	// Convert name to lowercase and replace spaces with underscores
+	streamID := strings.ToLower(name)
+	streamID = strings.ReplaceAll(streamID, " ", "_")
+	// Remove any characters that are not alphanumeric or underscore
+	reg := regexp.MustCompile("[^a-z0-9_]+")
+	streamID = reg.ReplaceAllString(streamID, "")
+	if streamID == "" {
+		streamID = "stream"
+	}
+	return streamID
 }
 
 func HTTPAPIUpdateStream(c *gin.Context) {
@@ -508,15 +541,16 @@ func HTTPAPIUpdateStream(c *gin.Context) {
 	defer Config.mutex.Unlock()
 
 	if stream, exists := Config.Streams[uuid]; exists {
-		if updatedStream.URL != uuid {
-			if _, exists := Config.Streams[updatedStream.URL]; exists {
+		// Check if new URL conflicts with any other stream
+		for streamID, existingStream := range Config.Streams {
+			if streamID != uuid && existingStream.URL == updatedStream.URL {
 				c.JSON(http.StatusConflict, gin.H{"error": "Stream with this URL already exists"})
 				return
 			}
-			delete(Config.Streams, uuid)
 		}
 
-		Config.Streams[updatedStream.URL] = StreamST{
+		// Update the stream in place
+		Config.Streams[uuid] = StreamST{
 			URL:          updatedStream.URL,
 			Name:         updatedStream.Name,
 			OnDemand:     updatedStream.OnDemand,
@@ -534,9 +568,9 @@ func HTTPAPIUpdateStream(c *gin.Context) {
 			return
 		}
 
-		log.Println("Updated stream:", updatedStream.URL)
+		log.Println("Updated stream:", uuid)
 		c.JSON(http.StatusOK, gin.H{
-			"id":     updatedStream.URL,
+			"id":     uuid,
 			"name":   updatedStream.Name,
 			"url":    updatedStream.URL,
 			"status": stream.Status,

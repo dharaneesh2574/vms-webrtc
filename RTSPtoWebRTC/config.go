@@ -23,7 +23,7 @@ type ConfigST struct {
 	mutex     sync.RWMutex
 	Server    ServerST            `json:"server"`
 	Streams   map[string]StreamST `json:"streams"`
-	LastError error
+	LastError error               `json:"-"`
 }
 
 // ServerST struct
@@ -38,15 +38,15 @@ type ServerST struct {
 
 // StreamST struct
 type StreamST struct {
-	Name         string `json:"name"`
-	URL          string `json:"url"`
-	Status       bool   `json:"status"`
-	OnDemand     bool   `json:"on_demand"`
-	DisableAudio bool   `json:"disable_audio"`
-	Debug        bool   `json:"debug"`
-	RunLock      bool   `json:"-"`
-	Codecs       []av.CodecData
-	Cl           map[string]viewer
+	Name         string            `json:"name"`
+	URL          string            `json:"url"`
+	Status       bool              `json:"status"`
+	OnDemand     bool              `json:"on_demand"`
+	DisableAudio bool              `json:"disable_audio"`
+	Debug        bool              `json:"debug"`
+	RunLock      bool              `json:"-"`
+	Codecs       []av.CodecData    `json:"-"`
+	Cl           map[string]viewer `json:"-"`
 }
 
 type viewer struct {
@@ -165,6 +165,22 @@ func loadConfig() *ConfigST {
 		tmp.Streams = make(map[string]StreamST)
 	}
 	return &tmp
+}
+
+// InitializeAllStreams starts all streams to discover their codecs
+func (element *ConfigST) InitializeAllStreams() {
+	time.Sleep(1 * time.Second) // Give the server time to start
+	element.mutex.RLock()
+	streamIDs := make([]string, 0, len(element.Streams))
+	for streamID := range element.Streams {
+		streamIDs = append(streamIDs, streamID)
+	}
+	element.mutex.RUnlock()
+
+	for _, streamID := range streamIDs {
+		log.Println("Initializing stream for codec discovery:", streamID)
+		element.RunIFNotRun(streamID)
+	}
 }
 
 func (element *ConfigST) cast(uuid string, pck av.Packet) {

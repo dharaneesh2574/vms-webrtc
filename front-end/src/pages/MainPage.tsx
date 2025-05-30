@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import Monitor from './Monitor';
@@ -23,19 +23,28 @@ const MainPage: React.FC<MainPageProps> = ({ setAuthenticated }) => {
   const [layout, setLayout] = useState<string>('auto'); // Default to 'auto'
   const [selectedCameras, setSelectedCameras] = useState<Camera[]>([]);
   const [allCameras, setAllCameras] = useState<Camera[]>([]);
+  const location = useLocation();
+
+  const loadDevices = useCallback(async () => {
+    try {
+      const devices = await fetchDevices();
+      console.log('Fetched devices in MainPage:', devices);
+      setAllCameras(devices);
+    } catch (error) {
+      console.error('Failed to fetch devices in MainPage:', error);
+    }
+  }, []);
 
   useEffect(() => {
-    const loadDevices = async () => {
-      try {
-        const devices = await fetchDevices();
-        console.log('Fetched devices in MainPage:', devices);
-        setAllCameras(devices);
-      } catch (error) {
-        console.error('Failed to fetch devices in MainPage:', error);
-      }
-    };
     loadDevices();
-  }, []);
+  }, [loadDevices]);
+
+  // Refresh devices when navigating to monitor from device manager
+  useEffect(() => {
+    if (location.pathname === '/monitor') {
+      loadDevices();
+    }
+  }, [location.pathname, loadDevices]);
 
   const toggleCameraSelection = (camera: Camera) => {
     if (selectedCameras.some(cam => cam.id === camera.id)) {

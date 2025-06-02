@@ -44,8 +44,8 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
   const [recordingStartTime, setRecordingStartTime] = useState<{ [key: string]: number }>({});
   const [fullscreenCamera, setFullscreenCamera] = useState<string | null>(null);
 
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY = 1000;
+  const MAX_RETRIES = 8;
+  const RETRY_DELAY = 1500;
 
   // Fetch stream info
   const fetchStreamInfo = async (cameraId: string, retryCount = 0): Promise<StreamInfo | null> => {
@@ -99,7 +99,7 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
         throw new Error('Invalid response format');
       }
     } catch (error: any) {
-      console.error(`Failed to fetch codec info for ${cameraId}:`, {
+      console.error(`Failed to fetch codec info for ${cameraId} (attempt ${retryCount + 1}/${MAX_RETRIES + 1}):`, {
         message: error.message,
         code: error.code,
         response: error.response ? {
@@ -108,9 +108,19 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
           headers: error.response.headers,
         } : null,
       });
-      if (retryCount < MAX_RETRIES && (error.code === 'ERR_NETWORK' || error.response?.status === 502)) {
-        console.log(`Retrying fetchCodecs (${retryCount + 1}/${MAX_RETRIES})...`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      
+      // Retry for network errors, 502 (bad gateway), 500 (stream restarting), and 404 (stream not ready)
+      const shouldRetry = retryCount < MAX_RETRIES && (
+        error.code === 'ERR_NETWORK' || 
+        error.response?.status === 502 || 
+        error.response?.status === 500 || // Stream is restarting and codecs not ready yet
+        error.response?.status === 404 ||  // Stream not found, might be starting up
+        (error.response?.status === 200 && error.response?.data === 'No codecs found') // Backend returned this as plain text
+      );
+      
+      if (shouldRetry) {
+        console.log(`Retrying fetchCodecs for ${cameraId} (${retryCount + 1}/${MAX_RETRIES}) - stream might be restarting...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1))); // Exponential backoff
         return fetchCodecs(cameraId, retryCount + 1);
       }
       return [];
@@ -213,6 +223,7 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
   // Modify setupWebRTC to include cleanup before setting up new connection
   const setupWebRTC = async (camera: Camera) => {
     if (camera.status !== 'active') {
+      console.log(`Skipping WebRTC setup for camera ${camera.id} - status: ${camera.status}`);
       return;
     }
 
@@ -226,63 +237,63 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
     peerConnections.current[camera.id] = pc;
     processedStreams.current.add(camera.id);
 
-    const streamInfo = await fetchStreamInfo(camera.id);
-    if (!streamInfo || !streamInfo.url) {
-      console.error(`No stream info found for ${camera.id}`);
-      return;
-    }
-
-    const codecs = await fetchCodecs(camera.id);
-    if (codecs.length === 0) {
-      console.error(`No codecs found for camera ${camera.id}`);
-      return;
-    }
-
-    codecs.forEach((codec) => {
-      console.log(`Adding transceiver for camera ${camera.id}, type: ${codec.Type}`);
-      if (pc.signalingState !== 'closed') {
-        pc.addTransceiver(codec.Type.toLowerCase(), { direction: 'sendrecv' });
-      }
-    });
-
-    pc.ontrack = (event) => {
-      console.log(`WebRTC ontrack event for camera ${camera.id}`, event);
-      const videoElement = videoRefs.current[camera.id];
-      if (videoElement && event.streams[0]) {
-        videoElement.srcObject = event.streams[0];
-        videoElement.play().catch((err) => console.error(`Video play error for camera ${camera.id}:`, err));
-      } else {
-        console.error(`Video element not found or no streams for camera ${camera.id}`);
-      }
-    };
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log(`ICE candidate for camera ${camera.id}:`, event.candidate);
-      }
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      console.log(`ICE connection state for camera ${camera.id}:`, pc.iceConnectionState);
-      if (pc.iceConnectionState === 'failed') {
-        console.error(`ICE connection failed for camera ${camera.id}`);
-        pc.close();
-        delete peerConnections.current[camera.id];
-        processedStreams.current.delete(camera.id);
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log(`Connection state for camera ${camera.id}:`, pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        console.error(`WebRTC connection failed for camera ${camera.id}`);
-        pc.close();
-        delete peerConnections.current[camera.id];
-        processedStreams.current.delete(camera.id);
-      }
-    };
-
     try {
+      const streamInfo = await fetchStreamInfo(camera.id);
+      if (!streamInfo || !streamInfo.url) {
+        console.error(`No stream info found for ${camera.id}`);
+        cleanupWebRTCConnection(camera.id);
+        return;
+      }
+
+      const codecs = await fetchCodecs(camera.id);
+      if (codecs.length === 0) {
+        console.error(`No codecs found for camera ${camera.id} after retries - stream may be down or restarting`);
+        cleanupWebRTCConnection(camera.id);
+        return;
+      }
+      
+      console.log(`Successfully fetched ${codecs.length} codec(s) for camera ${camera.id}`);
+
+      codecs.forEach((codec) => {
+        console.log(`Adding transceiver for camera ${camera.id}, type: ${codec.Type}`);
+        if (pc.signalingState !== 'closed') {
+          pc.addTransceiver(codec.Type.toLowerCase(), { direction: 'sendrecv' });
+        }
+      });
+
+      pc.ontrack = (event) => {
+        console.log(`WebRTC ontrack event for camera ${camera.id}`, event);
+        const videoElement = videoRefs.current[camera.id];
+        if (videoElement && event.streams[0]) {
+          videoElement.srcObject = event.streams[0];
+          videoElement.play().catch((err) => console.error(`Video play error for camera ${camera.id}:`, err));
+        } else {
+          console.error(`Video element not found or no streams for camera ${camera.id}`);
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log(`ICE candidate for camera ${camera.id}:`, event.candidate);
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state for camera ${camera.id}:`, pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') {
+          console.error(`ICE connection failed for camera ${camera.id}`);
+          cleanupWebRTCConnection(camera.id);
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log(`Connection state for camera ${camera.id}:`, pc.connectionState);
+        if (pc.connectionState === 'failed') {
+          console.error(`WebRTC connection failed for camera ${camera.id}`);
+          cleanupWebRTCConnection(camera.id);
+        }
+      };
+
       let offer = await pc.createOffer();
       if (offer.sdp) {
         offer.sdp = preferH264(offer.sdp);
@@ -294,6 +305,7 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
 
       if (!offer.sdp) {
         console.error(`SDP offer is undefined for camera ${camera.id}`);
+        cleanupWebRTCConnection(camera.id);
         return;
       }
 
@@ -317,17 +329,16 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
       console.log(`WebRTC answer received for camera ${camera.id}:`, response.data);
       if (!response.data.sdp64) {
         console.error(`No sdp64 in response for camera ${camera.id}`);
+        cleanupWebRTCConnection(camera.id);
         return;
       }
       const decodedSDPAnswer = atob(response.data.sdp64);
       await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: decodedSDPAnswer }));
+      
+      console.log(`WebRTC connection established successfully for camera ${camera.id}`);
     } catch (error) {
       console.error(`WebRTC setup error for ${camera.id}:`, error);
-      if (pc.signalingState !== 'closed') {
-        pc.close();
-      }
-      delete peerConnections.current[camera.id];
-      processedStreams.current.delete(camera.id);
+      cleanupWebRTCConnection(camera.id);
     }
   };
 

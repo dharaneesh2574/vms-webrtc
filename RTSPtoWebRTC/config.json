@@ -10,11 +10,27 @@
     "webrtc_port_max": 0
   },
   "streams": {
-    "cam_1": {
-      "name": "cam 1",
+    "prozone": {
+      "name": "prozone",
       "url": "rtsp://admin:skt@1234@163.47.211.117:555/live",
+      "status": true,
+      "on_demand": false,
+      "disable_audio": true,
+      "debug": false
+    },
+    "test_restart_stream": {
+      "name": "Test Restart Stream",
+      "url": "rtsp://demo:demo@rtsp.stream/pattern",
       "status": false,
       "on_demand": true,
+      "disable_audio": true,
+      "debug": false
+    },
+    "va_camera": {
+      "name": "va camera",
+      "url": "rtsp://admin:admin@123@192.168.1.145:554/cam/realmonitor?channel=1\u0026subtype=1",
+      "status": false,
+      "on_demand": false,
       "disable_audio": true,
       "debug": false
     }

@@ -59,18 +59,20 @@ func (element *ConfigST) RunIFNotRun(uuid string) {
 	if tmp, ok := element.Streams[uuid]; ok {
 		if tmp.OnDemand && !tmp.RunLock {
 			tmp.RunLock = true
-			tmp.Status = true
+			tmp.Status = false // Start as false, will be set to true when codecs are ready
+			tmp.Codecs = nil   // Clear old codecs to ensure fresh discovery
 			element.Streams[uuid] = tmp
 			log.Println("Starting on-demand stream", uuid)
 			go RTSPWorkerLoop(uuid, tmp.URL, tmp.OnDemand, tmp.DisableAudio, tmp.Debug)
 		} else if !tmp.OnDemand && !tmp.RunLock {
 			tmp.RunLock = true
-			tmp.Status = true
+			tmp.Status = false // Start as false, will be set to true when codecs are ready
+			tmp.Codecs = nil   // Clear old codecs to ensure fresh discovery
 			element.Streams[uuid] = tmp
 			log.Println("Starting non-on-demand stream", uuid)
 			go RTSPWorkerLoop(uuid, tmp.URL, tmp.OnDemand, tmp.DisableAudio, tmp.Debug)
 		} else {
-			log.Println("Stream", uuid, "already running or conditions not met")
+			log.Println("Stream", uuid, "already running or conditions not met. RunLock:", tmp.RunLock, "OnDemand:", tmp.OnDemand)
 		}
 	} else {
 		log.Println("Stream", uuid, "not found in config")
@@ -83,8 +85,9 @@ func (element *ConfigST) RunUnlock(uuid string) {
 	if tmp, ok := element.Streams[uuid]; ok {
 		tmp.RunLock = false
 		tmp.Status = false
+		tmp.Codecs = nil // Clear codecs when stream stops
 		element.Streams[uuid] = tmp
-		log.Println("Stopped stream", uuid)
+		log.Println("Stopped stream", uuid, "and cleared codecs")
 	} else {
 		log.Println("Stream", uuid, "not found for unlocking")
 	}
@@ -233,14 +236,34 @@ func (element *ConfigST) coAd(suuid string, codecs []av.CodecData) {
 }
 
 func (element *ConfigST) coGe(suuid string) []av.CodecData {
-	for i := 0; i < 100; i++ {
+	// Check if stream is running, if not and it's on-demand, try to start it
+	element.mutex.RLock()
+	tmp, ok := element.Streams[suuid]
+	element.mutex.RUnlock()
+
+	if !ok {
+		log.Println("Stream", suuid, "not found for getting codecs")
+		return nil
+	}
+
+	// If stream is not running and is on-demand, start it
+	if !tmp.RunLock && tmp.OnDemand {
+		log.Println("On-demand stream", suuid, "not running, starting it")
+		element.RunIFNotRun(suuid)
+	}
+
+	// Wait for codecs with extended timeout for restarted streams
+	maxRetries := 200 // Extended from 100 to 200 (10 seconds)
+	for i := 0; i < maxRetries; i++ {
 		element.mutex.RLock()
 		tmp, ok := element.Streams[suuid]
 		element.mutex.RUnlock()
+
 		if !ok {
 			log.Println("Stream", suuid, "not found for getting codecs")
 			return nil
 		}
+
 		if tmp.Codecs != nil {
 			for _, codec := range tmp.Codecs {
 				if codec.Type() == av.H264 {
@@ -257,10 +280,16 @@ func (element *ConfigST) coGe(suuid string) []av.CodecData {
 			log.Println("Returning codecs for stream", suuid)
 			return tmp.Codecs
 		}
-		log.Println("Codecs not ready for stream", suuid, "waiting")
+
+		// Log progress every 2 seconds (40 iterations)
+		if i%40 == 0 && i > 0 {
+			log.Printf("Still waiting for codecs for stream %s (attempt %d/%d, RunLock: %v, Status: %v)",
+				suuid, i, maxRetries, tmp.RunLock, tmp.Status)
+		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
-	log.Println("Failed to get codecs for stream", suuid, "after retries")
+	log.Println("Failed to get codecs for stream", suuid, "after", maxRetries, "retries")
 	return nil
 }
 
@@ -299,14 +328,13 @@ func (element *ConfigST) clDe(suuid, cuuid string) {
 	defer element.mutex.Unlock()
 	if tmp, ok := element.Streams[suuid]; ok {
 		delete(tmp.Cl, cuuid)
-		if len(tmp.Cl) == 0 && tmp.OnDemand {
-			tmp.RunLock = false
-			tmp.Status = false
-			element.Streams[suuid] = tmp
-			log.Println("No more viewers for on-demand stream", suuid, "stopping")
-		}
 		element.Streams[suuid] = tmp
-		log.Println("Removed client", cuuid, "from stream", suuid)
+		log.Println("Removed client", cuuid, "from stream", suuid, "- remaining viewers:", len(tmp.Cl))
+
+		if len(tmp.Cl) == 0 && tmp.OnDemand {
+			log.Println("No more viewers for on-demand stream", suuid, "- will stop when worker loop detects this")
+			// Don't manually stop here, let the worker loop handle it naturally
+		}
 	} else {
 		log.Println("Stream", suuid, "not found for removing client", cuuid)
 	}

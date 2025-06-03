@@ -1,22 +1,88 @@
 {
   "server": {
     "http_port": ":8083",
-    "ice_servers": [
-      "stun:stun.l.google.com:19302"
-    ],
-    "ice_username": "",
-    "ice_credential": "",
-    "webrtc_port_min": 0,
-    "webrtc_port_max": 0
+    "ice_servers": ["stun:stun.l.google.com:19302"]
   },
   "streams": {
-    "va_camera": {
-      "name": "va camera",
-      "url": "rtsp://admin:admin@123@192.168.1.145:554/cam/realmonitor?channel=1\u0026subtype=1",
-      "status": true,
+    "Goat_Ent": {
       "on_demand": false,
       "disable_audio": true,
-      "debug": false
+      "url": "rtsp://admin:admin@123@192.168.1.131/streaming/channels/101"
+    },
+    "Goat_Wrkplc": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.132/streaming/channels/101"
+    },
+    "Goat_strm": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.133/streaming/channels/101"
+    },
+    "Dot_Off": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.134/streaming/channels/101"
+    },
+    "Kato_HR": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.135/streaming/channels/101"
+    },
+    "kato_IT_Back": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.136/streaming/channels/101"
+    },
+    "Dot_IT": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.137/streaming/channels/101"
+    },
+    "Off_Ent": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.138:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "Goat_meeting": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.139:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "Goat_off": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.140:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "Kato_Ent": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.141:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "Off_Generator_area": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.142:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "Kato_Meeting": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.143:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "Parking": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.144:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "kato_VA_Team": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.145:554/cam/realmonitor?channel=1&subtype=1"
+    },
+    "Kato_Hardware_team": {
+      "on_demand": false,
+      "disable_audio": true,
+      "url": "rtsp://admin:admin@123@192.168.1.146:554/cam/realmonitor?channel=1&subtype=1"
     }
   }
 }

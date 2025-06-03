@@ -9,29 +9,17 @@ import (
 )
 
 var (
-	ErrorStreamExitNoVideoOnStream = errors.New("stream exit no video on stream")
-	ErrorStreamExitRtspDisconnect  = errors.New("stream exit rtsp disconnect")
-	ErrorStreamExitNoViewer        = errors.New("stream exit on demand no viewer")
+	ErrorStreamExitNoVideoOnStream = errors.New("Stream Exit No Video On Stream")
+	ErrorStreamExitRtspDisconnect  = errors.New("Stream Exit Rtsp Disconnect")
+	ErrorStreamExitNoViewer        = errors.New("Stream Exit On Demand No Viewer")
 )
 
 func serveStreams() {
-	// Start all non-on-demand streams permanently
 	for k, v := range Config.Streams {
 		if !v.OnDemand {
 			go RTSPWorkerLoop(k, v.URL, v.OnDemand, v.DisableAudio, v.Debug)
 		}
 	}
-
-	// Initialize all on-demand streams to discover codecs
-	go func() {
-		time.Sleep(2 * time.Second) // Give non-on-demand streams time to start
-		for k, v := range Config.Streams {
-			if v.OnDemand {
-				log.Println("Initializing on-demand stream for codec discovery:", k)
-				go RTSPWorkerLoop(k, v.URL, v.OnDemand, v.DisableAudio, v.Debug)
-			}
-		}
-	}()
 }
 func RTSPWorkerLoop(name, url string, OnDemand, DisableAudio, Debug bool) {
 	defer Config.RunUnlock(name)

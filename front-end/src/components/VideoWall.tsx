@@ -12,10 +12,11 @@ interface Codec {
 }
 
 interface StreamInfo {
-  uuid: string;
-  url: string;
-  onDemand: boolean;
-  status: string;
+  producers: Array<{
+    url: string;
+    type?: string;
+  }>;
+  consumers: Array<any>;
 }
 
 interface VideoWallProps {
@@ -46,13 +47,13 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
 
   const MAX_RETRIES = 8;
   const RETRY_DELAY = 1500;
+  const GO2RTC_API_URL = 'http://localhost:1984'; // Updated to use correct go2rtc port
 
-  // Fetch stream info
+  // Fetch stream info from go2rtc
   const fetchStreamInfo = async (cameraId: string, retryCount = 0): Promise<StreamInfo | null> => {
     try {
-      const response = await axios.get(`http://localhost:8083/stream/info/${encodeURIComponent(cameraId)}`, {
+      const response = await axios.get(`${GO2RTC_API_URL}/api/streams?src=${encodeURIComponent(cameraId)}`, {
         headers: {
-          'ngrok-skip-browser-warning': 'true',
           'Accept': 'application/json',
         },
       });
@@ -82,113 +83,135 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
     }
   };
 
-  // Fetch codec info
-  const fetchCodecs = async (cameraId: string, retryCount = 0): Promise<Codec[]> => {
+  // For go2rtc, we don't need separate codec endpoint as it's handled in WebRTC negotiation
+  const setupWebRTCConnection = async (cameraId: string): Promise<RTCPeerConnection | null> => {
     try {
-      const response = await axios.get(`http://localhost:8083/stream/codec/${encodeURIComponent(cameraId)}`, {
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-          'Accept': 'application/json',
+      console.log(`[${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}] Setting up WebRTC for camera ${cameraId}`);
+      
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }
+        ]
+      });
+
+      // Add transceivers for video and audio with support for multiple codecs
+      pc.addTransceiver('video', { 
+        direction: 'recvonly',
+        sendEncodings: []
+      });
+      pc.addTransceiver('audio', { 
+        direction: 'recvonly',
+        sendEncodings: []
+      });
+
+      pc.ontrack = (event) => {
+        console.log(`WebRTC ontrack event for camera ${cameraId}`, event);
+        const videoElement = videoRefs.current[cameraId];
+        if (videoElement && event.streams[0]) {
+          videoElement.srcObject = event.streams[0];
+          videoElement.play().catch((err) => console.error(`Video play error for camera ${cameraId}:`, err));
+        } else {
+          console.error(`Video element not found or no streams for camera ${cameraId}`);
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log(`ICE candidate for camera ${cameraId}:`, event.candidate);
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state for camera ${cameraId}:`, pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          console.error(`ICE connection failed/disconnected for camera ${cameraId}`);
+          // Try to restart ICE connection
+          if (pc.iceConnectionState === 'failed') {
+            cleanupWebRTCConnection(cameraId);
+          }
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log(`Connection state for camera ${cameraId}:`, pc.connectionState);
+        if (pc.connectionState === 'failed') {
+          console.error(`WebRTC connection failed for camera ${cameraId}`);
+          cleanupWebRTCConnection(cameraId);
+        }
+      };
+
+      // Create offer with multiple codec support
+      const offer = await pc.createOffer({
+        offerToReceiveVideo: true,
+        offerToReceiveAudio: true
+      });
+
+      // Modify SDP to include multiple video codecs
+      if (offer.sdp) {
+        let modifiedSdp = offer.sdp;
+        
+        // Ensure H265 and H264 codecs are both available
+        if (!modifiedSdp.includes('H265') && !modifiedSdp.includes('H264')) {
+          console.warn(`No H264/H265 found in offer SDP for camera ${cameraId}`);
+        }
+        
+        offer.sdp = modifiedSdp;
+      }
+
+      await pc.setLocalDescription(offer);
+
+      console.log(`Sending WebRTC offer for camera ${cameraId} to go2rtc`);
+      console.log('SDP Offer:', offer.sdp);
+
+      if (!offer.sdp) {
+        console.error(`SDP offer is undefined for camera ${cameraId}`);
+        pc.close();
+        return null;
+      }
+
+      // Send offer to go2rtc using the WebRTC API endpoint
+      const response = await axios.post(
+        `${GO2RTC_API_URL}/api/webrtc?src=${encodeURIComponent(cameraId)}`,
+        {
+          type: 'offer',
+          sdp: offer.sdp
         },
-      });
-      if (response.headers['content-type']?.includes('application/json')) {
-        console.log(`Codec info for camera ${cameraId}:`, response.data);
-        return response.data;
-      } else {
-        console.error(`Received non-JSON response for codec info ${cameraId}:`, response.data);
-        throw new Error('Invalid response format');
-      }
-    } catch (error: any) {
-      console.error(`Failed to fetch codec info for ${cameraId} (attempt ${retryCount + 1}/${MAX_RETRIES + 1}):`, {
-        message: error.message,
-        code: error.code,
-        response: error.response ? {
-          status: error.response.status,
-          data: error.response.data,
-          headers: error.response.headers,
-        } : null,
-      });
-      
-      // Retry for network errors, 502 (bad gateway), 500 (stream restarting), and 404 (stream not ready)
-      const shouldRetry = retryCount < MAX_RETRIES && (
-        error.code === 'ERR_NETWORK' || 
-        error.response?.status === 502 || 
-        error.response?.status === 500 || // Stream is restarting and codecs not ready yet
-        error.response?.status === 404 ||  // Stream not found, might be starting up
-        (error.response?.status === 200 && error.response?.data === 'No codecs found') // Backend returned this as plain text
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          timeout: 10000, // 10 second timeout
+        }
       );
+
+      console.log(`WebRTC answer received for camera ${cameraId}:`, response.data);
       
-      if (shouldRetry) {
-        console.log(`Retrying fetchCodecs for ${cameraId} (${retryCount + 1}/${MAX_RETRIES}) - stream might be restarting...`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1))); // Exponential backoff
-        return fetchCodecs(cameraId, retryCount + 1);
+      if (!response.data.sdp) {
+        console.error(`No SDP in response for camera ${cameraId}`);
+        pc.close();
+        return null;
       }
-      return [];
+
+      await pc.setRemoteDescription(new RTCSessionDescription({
+        type: 'answer',
+        sdp: response.data.sdp
+      }));
+      
+      console.log(`WebRTC connection established successfully for camera ${cameraId}`);
+      return pc;
+    } catch (error: any) {
+      console.error(`WebRTC setup error for ${cameraId}:`, error);
+      
+      // Log specific error details for better debugging
+      if (error.response) {
+        console.error(`HTTP Error ${error.response.status}:`, error.response.data);
+      } else if (error.code) {
+        console.error(`Network Error:`, error.code, error.message);
+      }
+      
+      return null;
     }
-  };
-
-  // Prefer H.264 codec in SDP
-  const preferH264 = (sdp: string): string => {
-    const lines = sdp.split('\r\n');
-    let h264PayloadTypes: string[] = [];
-    let rtxPayloadTypes: string[] = [];
-    const h264Profiles = ['42001f', '42e01f', '4d001f', '64001f'];
-    let videoSection = false;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.startsWith('m=video')) {
-        videoSection = true;
-      } else if (videoSection && line.startsWith('m=')) {
-        videoSection = false;
-      }
-      if (videoSection && line.startsWith('a=rtpmap:')) {
-        const match = line.match(/a=rtpmap:(\d+) H264\/90000/);
-        if (match) {
-          const payloadType = match[1];
-          const fmtpLine = lines.find((l) => l.startsWith(`a=fmtp:${payloadType}`));
-          if (fmtpLine && h264Profiles.some((profile) => fmtpLine.includes(profile))) {
-            h264PayloadTypes.push(payloadType);
-          }
-        } else if (line.includes('rtx/90000')) {
-          const matchRtx = line.match(/a=rtpmap:(\d+) rtx\/90000/);
-          if (matchRtx) {
-            const rtxPayloadType = matchRtx[1];
-            const fmtpLine = lines.find((l) => l.startsWith(`a=fmtp:${rtxPayloadType}`));
-            if (fmtpLine && h264PayloadTypes.some((pt) => fmtpLine.includes(`apt=${pt}`))) {
-              rtxPayloadTypes.push(rtxPayloadType);
-            }
-          }
-        }
-      }
-    }
-
-    if (h264PayloadTypes.length === 0) {
-      console.warn('No H264 payload types found in SDP');
-      return sdp;
-    }
-
-    const payloadTypesToKeep = [...h264PayloadTypes, ...rtxPayloadTypes];
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('m=video')) {
-        const parts = lines[i].split(' ');
-        const newPayloadTypes = parts.slice(0, 3).concat(payloadTypesToKeep);
-        lines[i] = newPayloadTypes.join(' ');
-      }
-    }
-
-    const filteredLines = lines.filter((line) => {
-      if (line.startsWith('a=rtpmap:') || line.startsWith('a=fmtp:') || line.startsWith('a=rtcp-fb:')) {
-        const match = line.match(/a=(rtpmap|fmtp|rtcp-fb):(\d+)/);
-        if (match) {
-          const payloadType = match[2];
-          return payloadTypesToKeep.includes(payloadType);
-        }
-      }
-      return true;
-    });
-
-    return filteredLines.join('\r\n');
   };
 
   // Add cleanup function for WebRTC connections
@@ -220,7 +243,7 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
     };
   }, []);
 
-  // Modify setupWebRTC to include cleanup before setting up new connection
+  // Setup WebRTC for a camera
   const setupWebRTC = async (camera: Camera) => {
     if (camera.status !== 'active') {
       console.log(`Skipping WebRTC setup for camera ${camera.id} - status: ${camera.status}`);
@@ -232,113 +255,19 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
       cleanupWebRTCConnection(camera.id);
     }
 
-    console.log(`[${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}] Setting up WebRTC for camera ${camera.id} (status: ${camera.status})`);
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    peerConnections.current[camera.id] = pc;
-    processedStreams.current.add(camera.id);
+    // Check if stream exists in go2rtc
+    const streamInfo = await fetchStreamInfo(camera.id);
+    if (!streamInfo || !streamInfo.producers || streamInfo.producers.length === 0) {
+      console.error(`No stream producers found for ${camera.id}`);
+      return;
+    }
 
-    try {
-      const streamInfo = await fetchStreamInfo(camera.id);
-      if (!streamInfo || !streamInfo.url) {
-        console.error(`No stream info found for ${camera.id}`);
-        cleanupWebRTCConnection(camera.id);
-        return;
-      }
-
-      const codecs = await fetchCodecs(camera.id);
-      if (codecs.length === 0) {
-        console.error(`No codecs found for camera ${camera.id} after retries - stream may be down or restarting`);
-        cleanupWebRTCConnection(camera.id);
-        return;
-      }
-      
-      console.log(`Successfully fetched ${codecs.length} codec(s) for camera ${camera.id}`);
-
-      codecs.forEach((codec) => {
-        console.log(`Adding transceiver for camera ${camera.id}, type: ${codec.Type}`);
-        if (pc.signalingState !== 'closed') {
-          pc.addTransceiver(codec.Type.toLowerCase(), { direction: 'sendrecv' });
-        }
-      });
-
-      pc.ontrack = (event) => {
-        console.log(`WebRTC ontrack event for camera ${camera.id}`, event);
-        const videoElement = videoRefs.current[camera.id];
-        if (videoElement && event.streams[0]) {
-          videoElement.srcObject = event.streams[0];
-          videoElement.play().catch((err) => console.error(`Video play error for camera ${camera.id}:`, err));
-        } else {
-          console.error(`Video element not found or no streams for camera ${camera.id}`);
-        }
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          console.log(`ICE candidate for camera ${camera.id}:`, event.candidate);
-        }
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state for camera ${camera.id}:`, pc.iceConnectionState);
-        if (pc.iceConnectionState === 'failed') {
-          console.error(`ICE connection failed for camera ${camera.id}`);
-          cleanupWebRTCConnection(camera.id);
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        console.log(`Connection state for camera ${camera.id}:`, pc.connectionState);
-        if (pc.connectionState === 'failed') {
-          console.error(`WebRTC connection failed for camera ${camera.id}`);
-          cleanupWebRTCConnection(camera.id);
-        }
-      };
-
-      let offer = await pc.createOffer();
-      if (offer.sdp) {
-        offer.sdp = preferH264(offer.sdp);
-      }
-      await pc.setLocalDescription(offer);
-
-      console.log(`Sending WebRTC offer for camera ${camera.id}`);
-      console.log('SDP Offer:', offer.sdp);
-
-      if (!offer.sdp) {
-        console.error(`SDP offer is undefined for camera ${camera.id}`);
-        cleanupWebRTCConnection(camera.id);
-        return;
-      }
-
-      const encodedSDPOffer = btoa(offer.sdp);
-      const formData = new URLSearchParams();
-      formData.append('url', streamInfo.url);
-      formData.append('sdp64', encodedSDPOffer);
-
-      const response = await axios.post(
-        `http://localhost:8083/stream`,
-        formData,
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'ngrok-skip-browser-warning': 'true',
-            'Accept': 'application/json',
-          },
-        }
-      );
-
-      console.log(`WebRTC answer received for camera ${camera.id}:`, response.data);
-      if (!response.data.sdp64) {
-        console.error(`No sdp64 in response for camera ${camera.id}`);
-        cleanupWebRTCConnection(camera.id);
-        return;
-      }
-      const decodedSDPAnswer = atob(response.data.sdp64);
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: decodedSDPAnswer }));
-      
-      console.log(`WebRTC connection established successfully for camera ${camera.id}`);
-    } catch (error) {
-      console.error(`WebRTC setup error for ${camera.id}:`, error);
-      cleanupWebRTCConnection(camera.id);
+    console.log(`Setting up WebRTC for camera ${camera.id} with ${streamInfo.producers.length} producer(s)`);
+    
+    const pc = await setupWebRTCConnection(camera.id);
+    if (pc) {
+      peerConnections.current[camera.id] = pc;
+      processedStreams.current.add(camera.id);
     }
   };
 
@@ -356,6 +285,38 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
         cleanupWebRTCConnection(cameraId);
       }
     });
+  }, [selectedCameras]);
+
+  // Add periodic health check and reconnection logic
+  useEffect(() => {
+    const healthCheckInterval = setInterval(async () => {
+      for (const camera of selectedCameras) {
+        if (camera.status === 'active') {
+          const pc = peerConnections.current[camera.id];
+          
+          // Check if connection is in a failed state
+          if (pc && (pc.connectionState === 'failed' || pc.iceConnectionState === 'failed')) {
+            console.log(`Detected failed connection for camera ${camera.id}, attempting reconnection...`);
+            cleanupWebRTCConnection(camera.id);
+            
+            // Wait a bit before attempting reconnection
+            setTimeout(() => {
+              if (selectedCameras.some(cam => cam.id === camera.id)) {
+                setupWebRTC(camera);
+              }
+            }, 2000);
+          }
+          
+          // Check if we should have a connection but don't
+          if (!pc && !processedStreams.current.has(camera.id)) {
+            console.log(`Missing connection for active camera ${camera.id}, attempting to establish...`);
+            setupWebRTC(camera);
+          }
+        }
+      }
+    }, 10000); // Check every 10 seconds
+
+    return () => clearInterval(healthCheckInterval);
   }, [selectedCameras]);
 
   // Calculate grid dimensions
@@ -449,6 +410,64 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
     }
     setShowRecordingConfirm(false);
     setSelectedCameraId(null);
+  };
+
+  // Function to capture screenshot using go2rtc snapshot API
+  const captureScreenshot = async (cameraId: string): Promise<string | null> => {
+    try {
+      console.log(`Capturing screenshot for camera ${cameraId} using go2rtc API`);
+      
+      const response = await axios.get(`${GO2RTC_API_URL}/api/frame.jpeg?src=${encodeURIComponent(cameraId)}`, {
+        responseType: 'blob',
+        timeout: 10000,
+      });
+
+      // Create a blob URL for the image
+      const imageBlob = response.data;
+      const imageUrl = URL.createObjectURL(imageBlob);
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.href = imageUrl;
+      link.download = `screenshot_${cameraId}_${Date.now()}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up the blob URL
+      setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
+      
+      const screenshotUrl = `screenshots/${cameraId}_${Date.now()}.jpg`;
+      console.log(`Screenshot captured successfully for camera ${cameraId}`);
+      return screenshotUrl;
+    } catch (error) {
+      console.error(`Failed to capture screenshot for camera ${cameraId}:`, error);
+      
+      // Fallback to canvas capture if go2rtc API fails
+      const videoElement = videoRefs.current[cameraId];
+      if (videoElement && videoElement.videoWidth > 0) {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = videoElement.videoWidth;
+          canvas.height = videoElement.videoHeight;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(videoElement, 0, 0);
+            const link = document.createElement('a');
+            link.href = canvas.toDataURL('image/jpeg', 0.8);
+            link.download = `screenshot_${cameraId}_${Date.now()}.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            return `screenshots/${cameraId}_${Date.now()}.jpg`;
+          }
+        } catch (canvasError) {
+          console.error('Canvas capture also failed:', canvasError);
+        }
+      }
+      
+      return null;
+    }
   };
 
   const handleCameraSelection = (slotIndex: number, selectedCameraId: string) => {
@@ -716,25 +735,16 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
         isOpen={showScreenshotConfirm}
         title="Take Screenshot"
         message="Do you want to take a screenshot of this camera view?"
-        onConfirm={() => {
-          const screenshotUrl = `screenshots/${selectedCameraId}_${Date.now()}.jpg`;
+        onConfirm={async () => {
           if (selectedCameraId) {
-            const videoElement = videoRefs.current[selectedCameraId];
-            if (videoElement) {
-              const canvas = document.createElement('canvas');
-              canvas.width = videoElement.videoWidth;
-              canvas.height = videoElement.videoHeight;
-              canvas.getContext('2d')?.drawImage(videoElement, 0, 0);
-              const link = document.createElement('a');
-              link.href = canvas.toDataURL('image/jpeg');
-              link.download = screenshotUrl;
-              link.click();
+            const screenshotUrl = await captureScreenshot(selectedCameraId);
+            if (screenshotUrl) {
+              onEventLog?.({
+                type: 'screenshot',
+                cameraId: selectedCameraId,
+                mediaUrl: screenshotUrl,
+              });
             }
-            onEventLog?.({
-              type: 'screenshot',
-              cameraId: selectedCameraId,
-              mediaUrl: screenshotUrl,
-            });
           }
           setShowScreenshotConfirm(false);
           setSelectedCameraId(null);

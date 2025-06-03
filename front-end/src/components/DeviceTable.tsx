@@ -27,7 +27,21 @@ const DeviceTable: React.FC<DeviceTableProps> = ({
 
   const handleAdd = async () => {
     try {
-      await addDevice({ ...selectedDevice!, ...formData });
+      // Convert Camera interface to addDevice interface
+      const deviceToAdd = {
+        name: formData.name || selectedDevice!.name,
+        url: selectedDevice!.streamUrl || '', // Map streamUrl to url with fallback
+        on_demand: selectedDevice!.onDemand || false,
+        disable_audio: selectedDevice!.disableAudio || false,
+        debug: selectedDevice!.debug || false,
+      };
+      
+      if (!deviceToAdd.url) {
+        console.error('No stream URL provided for device');
+        return;
+      }
+      
+      await addDevice(deviceToAdd);
       refreshDevices();
       setShowAddModal(false);
       setFormData({ name: '', username: '', password: '', groupName: '' });
@@ -126,7 +140,7 @@ const DeviceTable: React.FC<DeviceTableProps> = ({
                         name: device.name,
                         username: '',
                         password: '',
-                        groupName: device.groupName,
+                        groupName: device.groupName || '',
                       });
                       setShowEditModal(true);
                     }}

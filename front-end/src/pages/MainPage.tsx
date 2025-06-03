@@ -14,11 +14,7 @@ import Tickets from './Tickets';
 import { Camera } from '../types';
 import { fetchDevices } from '../api/devices';
 
-interface MainPageProps {
-  setAuthenticated: (value: boolean) => void;
-}
-
-const MainPage: React.FC<MainPageProps> = ({ setAuthenticated }) => {
+const MainPage: React.FC = () => {
   console.log('MainPage rendered');
   const [layout, setLayout] = useState<string>('auto'); // Default to 'auto'
   const [selectedCameras, setSelectedCameras] = useState<Camera[]>([]);
@@ -73,7 +69,7 @@ const MainPage: React.FC<MainPageProps> = ({ setAuthenticated }) => {
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex-1 flex flex-col">
-        <Navbar setAuthenticated={setAuthenticated} />
+        <Navbar />
         <Routes>
           <Route
             path="/monitor"

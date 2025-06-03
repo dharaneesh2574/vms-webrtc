@@ -196,13 +196,14 @@ const EventLogs: React.FC = () => {
                 {eventLogs.map((event) => (
                   <tr key={event.id} className="hover:bg-gray-700">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <button
-                        onClick={() => handleMediaClick(event.mediaUrl)}
-                        className="text-blue-400 hover:text-blue-300 flex items-center"
-                      >
-                        <FontAwesomeIcon icon={faPlay} className="mr-2" />
-                        {event.eventType === 'screenshot' ? 'Screenshot' : 'Recording'}
-                      </button>
+                      {event.mediaUrl && (
+                        <button
+                          onClick={() => handleMediaClick(event.mediaUrl!)}
+                          className="text-blue-400 hover:text-blue-600 underline"
+                        >
+                          {event.eventType === 'screenshot' ? 'Screenshot' : 'Recording'}
+                        </button>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-gray-300">{event.eventName}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-gray-300">

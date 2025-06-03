@@ -63,7 +63,7 @@ const DeviceManager: React.FC = () => {
       
       setShowAddModal(false);
       setFormData({ name: '', streamUrl: '', onDemand: true, disableAudio: true, debug: false });
-      showSuccess(`Stream "${formData.name}" added successfully!`);
+      showSuccess(`Stream "${formData.name}" added successfully and saved to configuration!`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add device');
       console.error('Error adding device:', err);
@@ -94,7 +94,7 @@ const DeviceManager: React.FC = () => {
       setShowEditModal(false);
       setSelectedDevice(null);
       setFormData({ name: '', streamUrl: '', onDemand: true, disableAudio: true, debug: false });
-      showSuccess(`Stream "${formData.name}" updated successfully!`);
+      showSuccess(`Stream "${formData.name}" updated successfully and saved to configuration!`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update device');
       console.error('Error updating device:', err);
@@ -117,7 +117,7 @@ const DeviceManager: React.FC = () => {
       setDevices(devices.filter(d => d.id !== id));
       await loadDevices(); // Refresh to get latest server state
       
-      showSuccess(`Stream "${name}" deleted successfully!`);
+      showSuccess(`Stream "${name}" deleted successfully and removed from configuration!`);
     } catch (err) {
       setError('Failed to delete device');
       console.error('Error deleting device:', err);

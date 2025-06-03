@@ -15,18 +15,18 @@ import (
 	"github.com/deepch/vdk/av"
 )
 
-//Config global
+// Config global
 var Config = loadConfig()
 
-//ConfigST struct
+// ConfigST struct
 type ConfigST struct {
-	mutex   sync.RWMutex
-	Server  ServerST            `json:"server"`
-	Streams map[string]StreamST `json:"streams"`
+	mutex     sync.RWMutex
+	Server    ServerST            `json:"server"`
+	Streams   map[string]StreamST `json:"streams"`
 	LastError error
 }
 
-//ServerST struct
+// ServerST struct
 type ServerST struct {
 	HTTPPort      string   `json:"http_port"`
 	ICEServers    []string `json:"ice_servers"`
@@ -36,16 +36,16 @@ type ServerST struct {
 	WebRTCPortMax uint16   `json:"webrtc_port_max"`
 }
 
-//StreamST struct
+// StreamST struct
 type StreamST struct {
-	URL          string `json:"url"`
-	Status       bool   `json:"status"`
-	OnDemand     bool   `json:"on_demand"`
-	DisableAudio bool   `json:"disable_audio"`
-	Debug        bool   `json:"debug"`
-	RunLock      bool   `json:"-"`
-	Codecs       []av.CodecData
-	Cl           map[string]viewer
+	URL          string            `json:"url"`
+	Status       bool              `json:"status"`
+	OnDemand     bool              `json:"on_demand"`
+	DisableAudio bool              `json:"disable_audio"`
+	Debug        bool              `json:"debug"`
+	RunLock      bool              `json:"-"`
+	Codecs       []av.CodecData    `json:"-"`
+	Cl           map[string]viewer `json:"-"`
 }
 
 type viewer struct {

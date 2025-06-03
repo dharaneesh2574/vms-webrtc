@@ -91,9 +91,25 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
           'Accept': 'application/json',
         },
       });
+      
+      // Check if response is JSON
       if (response.headers['content-type']?.includes('application/json')) {
         console.log(`Codec info for camera ${cameraId}:`, response.data);
-        return response.data;
+        
+        // Handle null response (stream has unsupported codecs like H265)
+        if (response.data === null) {
+          console.warn(`Camera ${cameraId} has unsupported codecs (likely H265) - cannot stream via WebRTC`);
+          return [];
+        }
+        
+        // Handle empty array or valid codec array
+        if (Array.isArray(response.data)) {
+          return response.data;
+        }
+        
+        // Handle unexpected data format
+        console.error(`Unexpected codec data format for ${cameraId}:`, response.data);
+        return [];
       } else {
         console.error(`Received non-JSON response for codec info ${cameraId}:`, response.data);
         throw new Error('Invalid response format');
@@ -109,13 +125,17 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
         } : null,
       });
       
-      // Retry for network errors, 502 (bad gateway), 500 (stream restarting), and 404 (stream not ready)
+      // Handle specific error cases
+      if (error.response?.status === 404) {
+        console.warn(`Stream ${cameraId} not found - skipping codec fetch`);
+        return [];
+      }
+      
+      // Retry for network errors, 502 (bad gateway), 500 (stream restarting)
       const shouldRetry = retryCount < MAX_RETRIES && (
         error.code === 'ERR_NETWORK' || 
         error.response?.status === 502 || 
-        error.response?.status === 500 || // Stream is restarting and codecs not ready yet
-        error.response?.status === 404 ||  // Stream not found, might be starting up
-        (error.response?.status === 200 && error.response?.data === 'No codecs found') // Backend returned this as plain text
+        error.response?.status === 500 // Stream is restarting and codecs not ready yet
       );
       
       if (shouldRetry) {
@@ -247,7 +267,7 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
 
       const codecs = await fetchCodecs(camera.id);
       if (codecs.length === 0) {
-        console.error(`No codecs found for camera ${camera.id} after retries - stream may be down or restarting`);
+        console.warn(`No compatible WebRTC codecs found for camera ${camera.id} - stream may use unsupported format (H265) or be offline`);
         cleanupWebRTCConnection(camera.id);
         return;
       }
@@ -311,7 +331,7 @@ const VideoWall: React.FC<VideoWallProps> = ({ allCameras, selectedCameras, setS
 
       const encodedSDPOffer = btoa(offer.sdp);
       const formData = new URLSearchParams();
-      formData.append('url', streamInfo.url);
+      formData.append('url', camera.id);
       formData.append('sdp64', encodedSDPOffer);
 
       const response = await axios.post(

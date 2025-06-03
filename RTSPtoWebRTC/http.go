@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,36 @@ import (
 
 type JCodec struct {
 	Type string
+}
+
+// API request/response types
+type StreamRequest struct {
+	Name         string `json:"name"`
+	URL          string `json:"url"`
+	OnDemand     bool   `json:"on_demand"`
+	DisableAudio bool   `json:"disable_audio"`
+	Debug        bool   `json:"debug"`
+}
+
+type StreamResponse struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	URL          string `json:"url"`
+	Status       bool   `json:"status"`
+	OnDemand     bool   `json:"on_demand"`
+	DisableAudio bool   `json:"disable_audio"`
+	Debug        bool   `json:"debug"`
+}
+
+type StreamsResponse struct {
+	Streams map[string]StreamResponse `json:"streams"`
+}
+
+type StreamInfoResponse struct {
+	UUID     string `json:"uuid"`
+	URL      string `json:"url"`
+	OnDemand bool   `json:"onDemand"`
+	Status   string `json:"status"`
 }
 
 func serveHTTP() {
@@ -33,6 +64,13 @@ func serveHTTP() {
 	router.GET("/stream/codec/:uuid", HTTPAPIServerStreamCodec)
 	router.POST("/stream", HTTPAPIServerStreamWebRTC2)
 
+	// New REST API endpoints for stream management
+	router.GET("/api/streams", HTTPAPIServerListStreams)
+	router.POST("/api/streams", HTTPAPIServerAddStream)
+	router.PUT("/api/stream/:id", HTTPAPIServerUpdateStream)
+	router.DELETE("/api/stream/:id", HTTPAPIServerDeleteStream)
+	router.GET("/stream/info/:id", HTTPAPIServerStreamInfo)
+
 	router.StaticFS("/static", http.Dir("web/static"))
 	err := router.Run(Config.Server.HTTPPort)
 	if err != nil {
@@ -40,7 +78,7 @@ func serveHTTP() {
 	}
 }
 
-//HTTPAPIServerIndex  index
+// HTTPAPIServerIndex  index
 func HTTPAPIServerIndex(c *gin.Context) {
 	_, all := Config.list()
 	if len(all) > 0 {
@@ -55,7 +93,7 @@ func HTTPAPIServerIndex(c *gin.Context) {
 	}
 }
 
-//HTTPAPIServerStreamPlayer stream player
+// HTTPAPIServerStreamPlayer stream player
 func HTTPAPIServerStreamPlayer(c *gin.Context) {
 	_, all := Config.list()
 	sort.Strings(all)
@@ -67,12 +105,13 @@ func HTTPAPIServerStreamPlayer(c *gin.Context) {
 	})
 }
 
-//HTTPAPIServerStreamCodec stream codec
+// HTTPAPIServerStreamCodec stream codec
 func HTTPAPIServerStreamCodec(c *gin.Context) {
 	if Config.ext(c.Param("uuid")) {
 		Config.RunIFNotRun(c.Param("uuid"))
 		codecs := Config.coGe(c.Param("uuid"))
 		if codecs == nil {
+			c.JSON(404, ResponseError{Error: "No codecs found"})
 			return
 		}
 		var tmpCodec []JCodec
@@ -87,18 +126,13 @@ func HTTPAPIServerStreamCodec(c *gin.Context) {
 				tmpCodec = append(tmpCodec, JCodec{Type: "audio"})
 			}
 		}
-		b, err := json.Marshal(tmpCodec)
-		if err == nil {
-			_, err = c.Writer.Write(b)
-			if err != nil {
-				log.Println("Write Codec Info error", err)
-				return
-			}
-		}
+		c.JSON(200, tmpCodec)
+	} else {
+		c.JSON(404, ResponseError{Error: "Stream not found"})
 	}
 }
 
-//HTTPAPIServerStreamWebRTC stream video over WebRTC
+// HTTPAPIServerStreamWebRTC stream video over WebRTC
 func HTTPAPIServerStreamWebRTC(c *gin.Context) {
 	if !Config.ext(c.PostForm("suuid")) {
 		log.Println("Stream Not Found")
@@ -156,12 +190,23 @@ func HTTPAPIServerStreamWebRTC(c *gin.Context) {
 
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Allow all origins
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-access-token")
-		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Cache-Control, Content-Language, Content-Type")
-		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT")
 
+		// Cannot use credentials with wildcard origin for security reasons
+		// Set to false to allow wildcard origin
+		c.Header("Access-Control-Allow-Credentials", "false")
+
+		// Allow common headers including ngrok-skip-browser-warning
+		c.Header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-access-token, ngrok-skip-browser-warning")
+
+		// Expose necessary headers
+		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Cache-Control, Content-Language, Content-Type")
+
+		// Allow all HTTP methods including DELETE
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+
+		// Handle preflight OPTIONS requests
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -181,18 +226,18 @@ type ResponseError struct {
 }
 
 func HTTPAPIServerStreamWebRTC2(c *gin.Context) {
-	url := c.PostForm("url")
-	if _, ok := Config.Streams[url]; !ok {
-		Config.Streams[url] = StreamST{
-			URL:      url,
-			OnDemand: true,
-			Cl:       make(map[string]viewer),
-		}
+	streamID := c.PostForm("url") // This is actually the stream ID/name now, not the URL
+
+	// Check if stream exists in configuration
+	if _, exists := Config.Streams[streamID]; !exists {
+		log.Printf("Stream %s not found in configuration", streamID)
+		c.JSON(404, ResponseError{Error: "Stream not found in configuration"})
+		return
 	}
 
-	Config.RunIFNotRun(url)
+	Config.RunIFNotRun(streamID)
 
-	codecs := Config.coGe(url)
+	codecs := Config.coGe(streamID)
 	if codecs == nil {
 		log.Println("Stream Codec Not Found")
 		c.JSON(500, ResponseError{Error: Config.LastError.Error()})
@@ -239,8 +284,8 @@ func HTTPAPIServerStreamWebRTC2(c *gin.Context) {
 	AudioOnly := len(codecs) == 1 && codecs[0].Type().IsAudio()
 
 	go func() {
-		cid, ch := Config.clAd(url)
-		defer Config.clDe(url, cid)
+		cid, ch := Config.clAd(streamID)
+		defer Config.clDe(streamID, cid)
 		defer muxerWebRTC.Close()
 		var videoStart bool
 		noVideo := time.NewTimer(10 * time.Second)
@@ -265,4 +310,199 @@ func HTTPAPIServerStreamWebRTC2(c *gin.Context) {
 			}
 		}
 	}()
+}
+
+// HTTPAPIServerListStreams lists all configured streams
+func HTTPAPIServerListStreams(c *gin.Context) {
+	streams := make(map[string]StreamResponse)
+
+	for id, stream := range Config.Streams {
+		streams[id] = StreamResponse{
+			ID:           id,
+			Name:         id, // Using ID as name if no specific name field
+			URL:          stream.URL,
+			Status:       Config.ext(id), // Check if stream exists and is running
+			OnDemand:     stream.OnDemand,
+			DisableAudio: stream.DisableAudio,
+			Debug:        stream.Debug,
+		}
+	}
+
+	response := StreamsResponse{
+		Streams: streams,
+	}
+
+	c.JSON(200, response)
+}
+
+// HTTPAPIServerAddStream adds a new stream configuration
+func HTTPAPIServerAddStream(c *gin.Context) {
+	var req StreamRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, ResponseError{Error: "Invalid request format"})
+		return
+	}
+
+	if req.Name == "" || req.URL == "" {
+		c.JSON(400, ResponseError{Error: "Name and URL are required"})
+		return
+	}
+
+	// Check if stream already exists
+	if _, exists := Config.Streams[req.Name]; exists {
+		c.JSON(409, ResponseError{Error: "Stream with this name already exists"})
+		return
+	}
+
+	// Add new stream to configuration
+	Config.Streams[req.Name] = StreamST{
+		URL:          req.URL,
+		OnDemand:     req.OnDemand,
+		DisableAudio: req.DisableAudio,
+		Debug:        req.Debug,
+		Cl:           make(map[string]viewer),
+	}
+
+	// Save configuration to file
+	if err := saveConfig(); err != nil {
+		log.Printf("Warning: Failed to save config after adding stream %s: %v", req.Name, err)
+		// Don't return error to client as the stream was added successfully in memory
+	}
+
+	response := StreamResponse{
+		ID:           req.Name,
+		Name:         req.Name,
+		URL:          req.URL,
+		Status:       false, // New stream starts inactive
+		OnDemand:     req.OnDemand,
+		DisableAudio: req.DisableAudio,
+		Debug:        req.Debug,
+	}
+
+	c.JSON(201, response)
+}
+
+// HTTPAPIServerUpdateStream updates an existing stream configuration
+func HTTPAPIServerUpdateStream(c *gin.Context) {
+	streamID := c.Param("id")
+
+	var req StreamRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, ResponseError{Error: "Invalid request format"})
+		return
+	}
+
+	// Check if stream exists
+	stream, exists := Config.Streams[streamID]
+	if !exists {
+		c.JSON(404, ResponseError{Error: "Stream not found"})
+		return
+	}
+
+	// Update stream configuration
+	if req.URL != "" {
+		stream.URL = req.URL
+	}
+	stream.OnDemand = req.OnDemand
+	stream.DisableAudio = req.DisableAudio
+	stream.Debug = req.Debug
+
+	Config.Streams[streamID] = stream
+
+	// Save configuration to file
+	if err := saveConfig(); err != nil {
+		log.Printf("Warning: Failed to save config after updating stream %s: %v", streamID, err)
+		// Don't return error to client as the stream was updated successfully in memory
+	}
+
+	response := StreamResponse{
+		ID:           streamID,
+		Name:         req.Name,
+		URL:          stream.URL,
+		Status:       Config.ext(streamID),
+		OnDemand:     stream.OnDemand,
+		DisableAudio: stream.DisableAudio,
+		Debug:        stream.Debug,
+	}
+
+	c.JSON(200, response)
+}
+
+// HTTPAPIServerDeleteStream deletes a stream configuration
+func HTTPAPIServerDeleteStream(c *gin.Context) {
+	streamID := c.Param("id")
+
+	// Check if stream exists
+	if _, exists := Config.Streams[streamID]; !exists {
+		c.JSON(404, ResponseError{Error: "Stream not found"})
+		return
+	}
+
+	// Remove from configuration - this will automatically stop the stream when it runs out of viewers
+	delete(Config.Streams, streamID)
+
+	// Save configuration to file
+	if err := saveConfig(); err != nil {
+		log.Printf("Warning: Failed to save config after deleting stream %s: %v", streamID, err)
+		// Don't return error to client as the stream was deleted successfully in memory
+	}
+
+	c.JSON(204, nil)
+}
+
+// HTTPAPIServerStreamInfo returns information about a specific stream
+func HTTPAPIServerStreamInfo(c *gin.Context) {
+	streamID := c.Param("id")
+
+	stream, exists := Config.Streams[streamID]
+	if !exists {
+		c.JSON(404, ResponseError{Error: "Stream not found"})
+		return
+	}
+
+	status := "inactive"
+	if Config.ext(streamID) {
+		status = "active"
+	}
+
+	response := StreamInfoResponse{
+		UUID:     streamID,
+		URL:      stream.URL,
+		OnDemand: stream.OnDemand,
+		Status:   status,
+	}
+
+	c.JSON(200, response)
+}
+
+// saveConfig saves the current configuration to config.json
+func saveConfig() error {
+	Config.mutex.Lock()
+	defer Config.mutex.Unlock()
+
+	// Create a temporary config structure for JSON serialization
+	configData := struct {
+		Server  ServerST            `json:"server"`
+		Streams map[string]StreamST `json:"streams"`
+	}{
+		Server:  Config.Server,
+		Streams: Config.Streams,
+	}
+
+	// Convert to JSON with proper formatting
+	data, err := json.MarshalIndent(configData, "", "  ")
+	if err != nil {
+		log.Printf("Error marshaling config: %v", err)
+		return err
+	}
+
+	// Write to config.json
+	err = ioutil.WriteFile("config.json", data, 0644)
+	if err != nil {
+		log.Printf("Error writing config file: %v", err)
+		return err
+	}
+
+	log.Println("Configuration saved to config.json")
+	return nil
 }

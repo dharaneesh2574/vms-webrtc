@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import kato_logo_extended from '../assets/kato_logo_extended.png';
+import kato_logo_shrinked from '../assets/kato_logo.png';
 import { 
   MdMonitor, 
   MdPlayCircle, 
@@ -50,8 +52,11 @@ const Sidebar: React.FC = () => {
       </button>
 
       <div className={`flex items-center ${isExpanded ? 'justify-start pl-4' : 'justify-center'} h-16`}>
-        <h1 className={`text-2xl font-bold ${isExpanded ? 'block' : 'hidden'}`}>VMS</h1>
-        <span className={`text-2xl font-bold ${!isExpanded ? 'block' : 'hidden'}`}>V</span>
+        <img 
+          src={isExpanded ? kato_logo_extended : kato_logo_shrinked } 
+          alt="VMS Logo"
+          className={`${isExpanded ? 'h-10' : 'h-8'} object-contain transition-all duration-200`}
+        />
       </div>
 
       <nav className="mt-4">
